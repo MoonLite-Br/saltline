@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Bản ĐỐI CHIẾU. cargo-quad-apk sinh manifest từ [package.metadata.android]
+  trong Cargo.toml, không đọc file này.
+  Sau khi build, diff với target/android-artifacts/.../AndroidManifest.xml.
+  Khác biệt cần giữ: minSdk 24, targetSdk 34, landscape, GLES 3.0,
+  exported=true, không có quyền INTERNET.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.saltline.fps"
+    android:versionCode="1"
+    android:versionName="0.1.0">
+
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
+
+    <uses-feature
+        android:glEsVersion="0x00030000"
+        android:required="true" />
+
+    <application
+        android:hasCode="false"
+        android:hardwareAccelerated="true"
+        android:enableOnBackInvokedCallback="false"
+        android:label="Saltline">
+        <activity
+            android:name="android.app.NativeActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="sensorLandscape">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="saltline" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -1,0 +1,143 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK + NDK r25
+        uses: android-actions/setup-android@v3
+        with:
+          packages: >
+            platform-tools
+            platforms;android-34
+            build-tools;34.0.0
+            ndk;25.2.9519653
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-saltline-v1-${{ hashFiles('**/Cargo.toml') }}
+
+      - name: Prepare NDK toolchain
+        run: |
+          set -e
+          NDK_DIR=""
+          for v in 25.2.9519653 25.1.8937393 26.3.11579264; do
+            for base in "${ANDROID_HOME}/ndk" "/usr/local/lib/android/sdk/ndk"; do
+              if [ -d "$base/$v" ]; then NDK_DIR="$base/$v"; break 2; fi
+            done
+          done
+          echo "NDK_DIR=$NDK_DIR"
+          test -d "$NDK_DIR"
+          PREBUILT="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          cd "$PREBUILT"
+          CLANG=$(ls aarch64-linux-android2[4-9]-clang aarch64-linux-android3*-clang 2>/dev/null | sort -V | tail -1)
+          [ -z "$CLANG" ] && CLANG=$(ls aarch64-linux-android*-clang 2>/dev/null | head -1)
+          echo "CLANG=$CLANG"
+          test -n "$CLANG"
+          [ -e aarch64-linux-android-ar ] || ln -sf llvm-ar aarch64-linux-android-ar
+          [ -e aarch64-linux-android-readelf ] || ln -sf llvm-readelf aarch64-linux-android-readelf
+          [ -e aarch64-linux-android-objcopy ] || ln -sf llvm-objcopy aarch64-linux-android-objcopy
+          [ -e aarch64-linux-android-strip ] || ln -sf llvm-strip aarch64-linux-android-strip
+          echo 'IyEvYmluL2Jhc2gKIyBUcmFuc2xhdGUgY29tbW9uIHJ1c3RjIGxkIGZsYWdzIGludG8gY2xhbmcgLVdsLCBmb3JtIGFuZCBkcml2ZSBsbGQKQ0xBTkdfQklOPSJfX0NMQU5HX18iCmFyZ3M9KCkKYXJncys9KCItZnVzZS1sZD1sbGQiKQpmb3IgYSBpbiAiJEAiOyBkbwogIGNhc2UgIiRhIiBpbgogICAgLS12ZXJzaW9uLXNjcmlwdD0qKSBhcmdzKz0oIi1XbCwkYSIpIDs7CiAgICAtLW5vLXVuZGVmaW5lZC12ZXJzaW9uKSBhcmdzKz0oIi1XbCwkYSIpIDs7CiAgICAtLWFzLW5lZWRlZCkgYXJncys9KCItV2wsJGEiKSA7OwogICAgLS1laC1mcmFtZS1oZHIpIGFyZ3MrPSgiLVdsLCRhIikgOzsKICAgIC0tZ2Mtc2VjdGlvbnMpIGFyZ3MrPSgiLVdsLCRhIikgOzsKICAgIC0tc3RyaXAtYWxsfC1zdHJpcC1hbGwpIGFyZ3MrPSgiLVdsLC0tc3RyaXAtYWxsIikgOzsKICAgIC1zaGFyZWQpIGFyZ3MrPSgiLXNoYXJlZCIpIDs7CiAgICAtQnN0YXRpY3wtQmR5bmFtaWMpIGFyZ3MrPSgiLVdsLCRhIikgOzsKICAgIC0tc3lzcm9vdD0qKSBhcmdzKz0oIiRhIikgOzsKICAgIC1MKnwtbCp8LW8qfC16KikgYXJncys9KCIkYSIpIDs7CiAgICAqKSBhcmdzKz0oIiRhIikgOzsKICBlc2FjCmRvbmUKZXhlYyAiJENMQU5HX0JJTiIgIiR7YXJnc1tAXX0iCg==' | base64 -d > aarch64-linux-android-ld
+          sed -i "s|__CLANG__|$(pwd)/$CLANG|" aarch64-linux-android-ld
+          chmod +x aarch64-linux-android-ld
+          {
+            echo "ANDROID_HOME=$ANDROID_HOME"
+            echo "ANDROID_SDK_ROOT=$ANDROID_HOME"
+            echo "NDK_HOME=$NDK_DIR"
+            echo "ANDROID_NDK_HOME=$NDK_DIR"
+            echo "ANDROID_NDK_ROOT=$NDK_DIR"
+            echo "AR_aarch64_linux_android=$PREBUILT/llvm-ar"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_AR=$PREBUILT/llvm-ar"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$PREBUILT/aarch64-linux-android-ld"
+            echo "CC_aarch64_linux_android=$PREBUILT/$CLANG"
+            echo "PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/34.0.0:$PREBUILT"
+          } >> "$GITHUB_ENV"
+
+      - name: Build for Android (aarch64)
+        run: |
+          set -e
+          mkdir -p .cargo
+          cat > .cargo/config.toml << 'CFG'
+          [target.aarch64-linux-android]
+          ar = "aarch64-linux-android-ar"
+          linker = "aarch64-linux-android-ld"
+          rustflags = ["-C", "link-arg=-shared", "-C", "link-arg=-Wl,-soname,libsaltline.so"]
+          CFG
+          cargo build --release --target aarch64-linux-android
+          ls -la target/aarch64-linux-android/release/
+          file target/aarch64-linux-android/release/saltline || true
+
+      - name: Package APK
+        run: |
+          set -e
+          BUILD=apk-build
+          rm -rf "$BUILD"
+          mkdir -p "$BUILD/lib/arm64-v8a" "$BUILD/res/values"
+          if [ -f target/aarch64-linux-android/release/libsaltline.so ]; then
+            cp -v target/aarch64-linux-android/release/libsaltline.so "$BUILD/lib/arm64-v8a/"
+          else
+            cp -v target/aarch64-linux-android/release/saltline "$BUILD/lib/arm64-v8a/libsaltline.so"
+          fi
+          file "$BUILD/lib/arm64-v8a/libsaltline.so"
+          cat > "$BUILD/res/values/strings.xml" << 'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">Saltline</string>
+          </resources>
+          XML
+          cp android/AndroidManifest.xml "$BUILD/AndroidManifest.xml"
+          AAPT2=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+          "$AAPT2" compile --dir "$BUILD/res" -o "$BUILD/res.zip"
+          "$AAPT2" link -o "$BUILD/saltline-unaligned.apk" \
+            -I "$ANDROID_HOME/platforms/android-34/android.jar" \
+            --manifest "$BUILD/AndroidManifest.xml" \
+            -R "$BUILD/res.zip" --auto-add-overlay
+          (cd "$BUILD" && zip -u saltline-unaligned.apk lib/arm64-v8a/libsaltline.so)
+          KEYSTORE="$HOME/.android/debug.keystore"
+          if [ ! -f "$KEYSTORE" ]; then
+            mkdir -p "$(dirname "$KEYSTORE")"
+            keytool -genkeypair -v -keystore "$KEYSTORE" -storepass android \
+              -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+              -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BUILD_TOOLS/zipalign" -f 4 "$BUILD/saltline-unaligned.apk" "$BUILD/saltline-aligned.apk"
+          "$BUILD_TOOLS/apksigner" sign --ks "$KEYSTORE" --ks-pass pass:android \
+            --key-pass pass:android --out saltline.apk "$BUILD/saltline-aligned.apk"
+          ls -la saltline.apk
+          "$BUILD_TOOLS/aapt" dump badging saltline.apk 2>/dev/null | head -15 || true
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: saltline-apk
+          path: saltline.apk
+          if-no-files-found: error
+          retention-days: 30

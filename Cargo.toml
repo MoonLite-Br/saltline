@@ -1,0 +1,22 @@
+[package]
+name = "saltline"
+version = "0.1.0"
+edition = "2021"
+description = "Saltline — FPS 3D procedural cho Android yếu (Macroquad, GLES 3)"
+license = "MIT"
+publish = false
+
+[dependencies]
+macroquad = { version = "=0.4.16", features = ["audio"] }
+arrayvec = "=0.7.8"
+smallvec = { version = "=1.16.5", features = ["const_generics"] }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = false
+incremental = false
+overflow-checks = false
